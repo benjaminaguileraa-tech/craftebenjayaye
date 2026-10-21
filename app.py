@@ -35,6 +35,7 @@ from precios_guardados import consultar_lecturas
 from historial_mercado import consultar_historial,imagen_historial
 from almacenamiento import obtener_db,conectar_base
 from archivos_web import enviar_archivo,acepta_gzip
+from usuarios_web import espacio_privado, ruta_privada, cabeceras_privadas
 
 
 ROOT = Path(__file__).resolve().parent
@@ -55,8 +56,9 @@ RECETAS_EQUIPO = DATOS_EQUIPO['recetas']
 
 def _abrir_precios() -> sqlite3.Connection:
     """Una conexión por solicitud permite guardar desde varios navegadores."""
-    DB_PRECIOS.parent.mkdir(parents=True, exist_ok=True)
-    conexion = conectar_base(DB_PRECIOS)
+    base = ruta_privada(DB_PRECIOS)
+    base.parent.mkdir(parents=True, exist_ok=True)
+    conexion = conectar_base(base)
     try:
         conexion.execute("CREATE TABLE IF NOT EXISTS precios (id TEXT PRIMARY KEY, precio TEXT NOT NULL)")
         conexion.execute("""CREATE TABLE IF NOT EXISTS lotes (
@@ -880,6 +882,10 @@ class Manejador(BaseHTTPRequestHandler):
         self.send_error(403,"Acceso privado. Abre el enlace que te compartieron.")
         return False
 
+    def end_headers(self):
+        cabeceras_privadas(self)
+        super().end_headers()
+
     def log_message(self, formato: str, *args) -> None:
         """No escribe parámetros de invitación en la consola del servidor."""
         if len(args)>1 and isinstance(args[1],str):
@@ -932,6 +938,7 @@ class Manejador(BaseHTTPRequestHandler):
         except (OSError,sqlite3.Error):pass
         finally:self.close_connection=True
 
+    @espacio_privado
     def do_GET(self) -> None:
         if not self._acceso_compartido_autorizado():return
         ruta = urllib.parse.urlparse(self.path)
@@ -1065,6 +1072,7 @@ class Manejador(BaseHTTPRequestHandler):
         except (OSError, sqlite3.Error):
             self._json(503, {'error': 'No se pudo guardar; se reintentará'})
 
+    @espacio_privado
     def do_POST(self) -> None:
         if self.path == '/api/sync/precios':
             self._recibir_sincronizacion()
@@ -1093,6 +1101,7 @@ class Manejador(BaseHTTPRequestHandler):
         except (sqlite3.Error, OSError):
             self._json(500, {"error": "No se pudieron guardar los datos. Comprueba que la carpeta permita escritura."})
 
+    @espacio_privado
     def do_PATCH(self) -> None:
         if not self._acceso_compartido_autorizado():return
         if self.path not in ('/api/plan','/api/plan/completar','/api/plan/compras'):self.send_error(404);return
@@ -1114,6 +1123,7 @@ class Manejador(BaseHTTPRequestHandler):
         except (ValueError,TypeError,json.JSONDecodeError) as exc:self._json(400,{'error':str(exc)})
         except (sqlite3.Error,OSError):self._json(500,{'error':'No se pudieron guardar los precios del lote'})
 
+    @espacio_privado
     def do_DELETE(self) -> None:
         if not self._acceso_compartido_autorizado():return
         ruta = urllib.parse.urlparse(self.path)
