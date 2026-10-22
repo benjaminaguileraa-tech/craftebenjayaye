@@ -6,6 +6,7 @@
   <meta name="theme-color" content="#11151c">
   <title>Benjayaye Craft V54 · Calculadora de Albion Online</title>
   <link rel="stylesheet" href="/web/estilos.css">
+  <script src="/web/persistencia.js" defer></script>
   <script src="/web/plan.js" defer></script>
   <script src="/web/mercado.js" defer></script>
   <script src="/web/app.js" defer></script>
@@ -245,7 +246,7 @@
 
       <section id="acerca" class="pie-ayuda">
         <h2>Cómo usarla</h2>
-        <p>Busca el objeto arriba, elige tier y encantamiento e introduce su precio de venta. Registra una vez los precios de los materiales en la base inferior: se guardan en este equipo y aparecen automáticamente arriba cuando seleccionas otra receta. También puedes cambiarlos arriba; esos cambios se guardan al salir del campo. Verifica las cantidades antes de fabricar.</p>
+        <p>Busca el objeto arriba, elige tier y encantamiento e introduce su precio de venta. Registra una vez los precios de los materiales en la base inferior: se guardan en tu espacio privado y aparecen automáticamente arriba cuando seleccionas otra receta. También puedes cambiarlos arriba; esos cambios se guardan al salir del campo. Verifica las cantidades antes de fabricar.</p>
         <p>Hay 2.501 iconos locales. Para otros objetos, la imagen se solicita al render oficial de Albion si hay conexión.</p>
         <p>Para cocinar, elige «Comidas» en el catálogo y busca por nombre. Introduce el número de crafteos y el precio de venta de una comida. Los ingredientes se indican por crafteo; el panel muestra cuántas comidas obtendrás. Las 219 recetas incluidas funcionan sin conexión.</p>
       </section>
@@ -255,6 +256,7 @@
           <div><p class="sobretitulo">TUS CRAFTEOS GUARDADOS</p><h2 id="titulo-plan">Materiales acumulados</h2></div>
           <a class="boton-secundario volver-calculadora" href="#calculadora">Añadir otro crafteo ↑</a>
         </div>
+        <p class="nota-receta-precios" id="privacidad-plan">Tus crafteos, compras y precios manuales son privados para este navegador. Otras personas que abran el enlace tendrán su propia lista. Se guarda una copia automática en este navegador para recuperarlos si el servidor se reinicia. Para cambiar de dispositivo, descarga un respaldo JSON. No borres los datos del sitio ni uses modo incógnito para conservar esta copia.</p>
         <p class="aviso-receta">Cada guardado añade el lote y su porcentaje de devolución. La cantidad a comprar descuenta los materiales devueltos y se redondea a un entero. Los artefactos no reciben devolución. El tier y el encantamiento se contabilizan por separado.</p>
         <div class="metricas-plan">
           <div><strong id="total-lotes-plan">0</strong><span>Lotes guardados</span></div>
@@ -310,8 +312,9 @@
         </div>
         <p class="nota-receta-precios">Los precios y costes guardados se conservan. Si falta el valor del objeto y está incluido en la aplicación, se usa automáticamente para calcular la estación. Los totales incluyen todos los lotes; cualquier importe parcial se indica expresamente. Las ganancias se basan en el consumo neto estimado, antes de redondear las unidades a comprar.</p>
         <details class="respaldo-datos"><summary>Respaldo y recuperación de la calculadora</summary>
-          <p>Descarga tus lotes, precios manuales y cantidades compradas para guardarlos o llevarlos a otra computadora. Al recuperar se añaden solo los datos ausentes; los actuales se conservan. El respaldo no incluye las lecturas ni la configuración del lector.</p>
-          <a class="boton-secundario" href="/api/respaldo" download>Descargar respaldo JSON</a>
+          <p>Descarga tus lotes privados, precios manuales y cantidades compradas para guardarlos o llevarlos a otro navegador o computadora. Al recuperar se añaden solo los datos ausentes; los actuales se conservan. El respaldo no incluye las lecturas ni la configuración del lector.</p>
+          <p id="estado-persistencia" role="status" aria-live="polite">Preparando copia automática…</p>
+          <a id="descargar-respaldo-local" class="boton-secundario" href="/api/respaldo" download>Descargar respaldo JSON</a>
           <div class="herramientas-respaldo"><label for="archivo-respaldo">Elegir un respaldo JSON<input id="archivo-respaldo" type="file" accept=".json,application/json"></label><button id="restaurar-respaldo" class="boton-secundario" type="button" disabled>Recuperar datos ausentes</button></div>
           <p id="estado-respaldo" role="status">Puedes recuperar el mismo respaldo varias veces sin duplicar tus lotes.</p>
         </details>

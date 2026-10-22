@@ -93,7 +93,7 @@ function pintarPlan(plan) {
   pintarLotesPlan(plan);
   $("estado-plan").textContent = plan.lotes.some(lote => !lote.retorno_guardado)
     ? "Hay lotes antiguos sin devolución guardada: se mantienen al 0 %. Usa Editar lote para aplicarles el porcentaje que necesites."
-    : "Lista guardada en este equipo. Cada lote conserva su porcentaje de devolución.";
+    : "Lista privada de este navegador. Cada lote conserva su porcentaje de devolución.";
   $("estado-plan").classList.remove("error");
   const f = plan.finanzas;
   $('ganancia-total-plan').textContent = f?.ganancia_total != null ? dinero(f.ganancia_total) : 'Pendiente';
@@ -285,7 +285,7 @@ function iniciarPlan() {
   $('deshacer-lote').addEventListener('click',deshacerLote);
   $('archivo-respaldo').addEventListener('change',()=>{
     $('restaurar-respaldo').disabled=estado.planOcupado||!$('archivo-respaldo').files?.length;
-    $('estado-respaldo').textContent='El respaldo añadirá solo los lotes y precios que no existen en este equipo.';
+    $('estado-respaldo').textContent='El respaldo añadirá solo los lotes y precios ausentes en tu espacio privado.';
   });
   $('restaurar-respaldo').addEventListener('click',restaurarRespaldo);
   $('editor-lote-form').addEventListener('submit',guardarEdicionLote);

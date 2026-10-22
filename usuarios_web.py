@@ -7,6 +7,10 @@ from functools import wraps
 from hashlib import sha256
 from http.cookies import SimpleCookie, CookieError
 from urllib.parse import urlsplit
+from threading import RLock
+
+# Serializa cada espacio privado sin mantener un registro ilimitado de visitantes.
+CERROJOS = tuple(RLock() for _ in range(64))
 
 COOKIE = 'benjayaye_visitante'
 VISITANTE = ContextVar('visitante_web', default=None)
@@ -61,6 +65,13 @@ def espacio_privado(metodo):
                 self._cookie_visitante_nueva = visitante
         contexto = VISITANTE.set(visitante)
         try:
+            if visitante and ruta_personal(ruta):
+                with CERROJOS[int(sha256(visitante.encode()).hexdigest(), 16) % len(CERROJOS)]:
+                    esperada = self.headers.get('X-Craft-Generation')
+                    if esperada and self.command not in ('GET', 'HEAD') and esperada != self._generacion_privada():
+                        self._json(409, {'error': 'El servidor se reinició. Actualiza la lista para recuperar tu copia antes de continuar.'})
+                        return
+                    return metodo(self, *args, **kwargs)
             return metodo(self, *args, **kwargs)
         finally:
             VISITANTE.reset(contexto)

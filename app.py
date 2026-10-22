@@ -65,7 +65,15 @@ def _abrir_precios() -> sqlite3.Connection:
             id TEXT PRIMARY KEY, datos TEXT NOT NULL,
             creado TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
         )""")
+        conexion.execute('CREATE TABLE IF NOT EXISTS persistencia (clave TEXT PRIMARY KEY, valor TEXT NOT NULL)')
+        conexion.execute("INSERT OR IGNORE INTO persistencia VALUES ('generacion', ?)", (secrets.token_hex(24),))
+        conexion.commit()
         conexion.execute('CREATE TABLE IF NOT EXISTS compras_plan (id TEXT PRIMARY KEY, cantidad INTEGER NOT NULL CHECK(cantidad>0))')
+        conexion.execute("INSERT OR IGNORE INTO persistencia VALUES ('revision', '0')")
+        for tabla in ('precios', 'lotes', 'compras_plan'):
+            for accion in ('INSERT', 'UPDATE', 'DELETE'):
+                conexion.execute(f"CREATE TRIGGER IF NOT EXISTS revision_{tabla}_{accion} AFTER {accion} ON {tabla} BEGIN UPDATE persistencia SET valor=CAST(valor AS INTEGER)+1 WHERE clave='revision'; END")
+        conexion.commit()
     except Exception:
         conexion.close()
         raise
@@ -528,12 +536,14 @@ def exportar_respaldo() -> dict:
     """Copia consistente de lotes y precios manuales, sin datos del lector."""
     with closing(_abrir_precios()) as con,con:
         con.execute('BEGIN')
+        revision=int(con.execute("SELECT valor FROM persistencia WHERE clave='revision'").fetchone()[0])
+        generacion=con.execute("SELECT valor FROM persistencia WHERE clave='generacion'").fetchone()[0]
         precios=dict(con.execute('SELECT id,precio FROM precios'))
         lotes=[{'id':id,'datos':json.loads(datos),'creado':creado}
                for id,datos,creado in con.execute('SELECT id,datos,creado FROM lotes ORDER BY rowid')]
         compras=dict(con.execute('SELECT id,cantidad FROM compras_plan'))
     copia={'formato':FORMATO_RESPALDO,'version':1,'creado':datetime.now(timezone.utc).isoformat(),
-           'precios':precios,'lotes':lotes}
+           'precios':precios,'lotes':lotes,'generacion':generacion,'revision':revision}
     if compras:copia['compras']=compras
     return copia
 
@@ -908,7 +918,15 @@ class Manejador(BaseHTTPRequestHandler):
         try:self.wfile.write(contenido)
         except (BrokenPipeError,ConnectionResetError):self.close_connection=True
 
+    def _generacion_privada(self):
+        with closing(_abrir_precios()) as con:
+            return con.execute("SELECT valor FROM persistencia WHERE clave='generacion'").fetchone()[0]
+
     def _json(self, codigo: int, objeto: object) -> None:
+        ruta = urllib.parse.urlsplit(self.path).path
+        if codigo == 200 and isinstance(objeto, dict) and getattr(self, '_respuesta_personal', False):
+            if ruta == '/api/plan' or self.command in ('POST', 'PATCH', 'DELETE'):
+                objeto = dict(objeto, _respaldo=exportar_respaldo())
         contenido=json.dumps(objeto,ensure_ascii=False,separators=(',',':')).encode('utf-8')
         comprimir=len(contenido)>=2048 and acepta_gzip(self.headers.get('Accept-Encoding',''))
         if comprimir:contenido=gzip.compress(contenido,compresslevel=3,mtime=0)
@@ -1041,6 +1059,7 @@ class Manejador(BaseHTTPRequestHandler):
             "/": ("web/index.html", "text/html; charset=utf-8"),
             "/web/estilos.css": ("web/estilos.css", "text/css; charset=utf-8"),
             "/web/app.js": ("web/app.js", "text/javascript; charset=utf-8"),
+            "/web/persistencia.js": ("web/persistencia.js", "text/javascript; charset=utf-8"),
             "/web/plan.js": ("web/plan.js", "text/javascript; charset=utf-8"),
             "/web/fondo-n12.jpg": ("web/fondo-n12.jpg", "image/jpeg"),
         }
@@ -1078,15 +1097,21 @@ class Manejador(BaseHTTPRequestHandler):
             self._recibir_sincronizacion()
             return
         if not self._acceso_compartido_autorizado():return
-        if self.path not in ("/api/calcular", "/api/precios", "/api/plan", '/api/respaldo/importar'):
+        if self.path not in ("/api/calcular", "/api/precios", "/api/plan", '/api/respaldo/importar', '/api/respaldo/recuperar'):
             self.send_error(404)
             return
         try:
             tamano = int(self.headers.get("Content-Length", "0"))
-            if not 0 < tamano <= (16*1024*1024 if self.path=='/api/respaldo/importar' else 65536):
+            if not 0 < tamano <= (16*1024*1024 if self.path.startswith('/api/respaldo/') else 65536):
                 raise ValueError("Solicitud demasiado grande o vacía")
             datos = json.loads(self.rfile.read(tamano))
-            if self.path == '/api/respaldo/importar':
+            if self.path == '/api/respaldo/recuperar':
+                actual = exportar_respaldo()
+                if not self.headers.get('X-Craft-Generation') or actual['lotes'] or actual['precios'] or actual.get('compras'):
+                    self._json(409, {'error': 'Este espacio ya contiene datos. Conservamos tu copia local; descarga el respaldo antes de combinarlo manualmente.'})
+                    return
+                self._json(200, importar_respaldo(datos))
+            elif self.path == '/api/respaldo/importar':
                 self._json(200,importar_respaldo(datos))
             elif self.path == "/api/plan":
                 self._json(200, guardar_lote(datos))
