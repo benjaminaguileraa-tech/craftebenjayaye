@@ -13,6 +13,7 @@ import io
 import unicodedata
 import hmac
 import ipaddress
+import os
 import re
 import secrets
 import sqlite3
@@ -35,7 +36,8 @@ from precios_guardados import consultar_lecturas
 from historial_mercado import consultar_historial,imagen_historial
 from almacenamiento import obtener_db,conectar_base
 from archivos_web import enviar_archivo,acepta_gzip
-from usuarios_web import espacio_privado, ruta_privada, cabeceras_privadas
+from precios_api import (MAX_BYTES_API, RUTA_ENVIO_API, RUTA_PUBLICOS, agregar_publicos,
+                         consultar_cotizaciones, recibir_cotizaciones, token_valido)
 
 
 ROOT = Path(__file__).resolve().parent
@@ -56,24 +58,15 @@ RECETAS_EQUIPO = DATOS_EQUIPO['recetas']
 
 def _abrir_precios() -> sqlite3.Connection:
     """Una conexión por solicitud permite guardar desde varios navegadores."""
-    base = ruta_privada(DB_PRECIOS)
-    base.parent.mkdir(parents=True, exist_ok=True)
-    conexion = conectar_base(base)
+    DB_PRECIOS.parent.mkdir(parents=True, exist_ok=True)
+    conexion = conectar_base(DB_PRECIOS)
     try:
         conexion.execute("CREATE TABLE IF NOT EXISTS precios (id TEXT PRIMARY KEY, precio TEXT NOT NULL)")
         conexion.execute("""CREATE TABLE IF NOT EXISTS lotes (
             id TEXT PRIMARY KEY, datos TEXT NOT NULL,
             creado TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
         )""")
-        conexion.execute('CREATE TABLE IF NOT EXISTS persistencia (clave TEXT PRIMARY KEY, valor TEXT NOT NULL)')
-        conexion.execute("INSERT OR IGNORE INTO persistencia VALUES ('generacion', ?)", (secrets.token_hex(24),))
-        conexion.commit()
         conexion.execute('CREATE TABLE IF NOT EXISTS compras_plan (id TEXT PRIMARY KEY, cantidad INTEGER NOT NULL CHECK(cantidad>0))')
-        conexion.execute("INSERT OR IGNORE INTO persistencia VALUES ('revision', '0')")
-        for tabla in ('precios', 'lotes', 'compras_plan'):
-            for accion in ('INSERT', 'UPDATE', 'DELETE'):
-                conexion.execute(f"CREATE TRIGGER IF NOT EXISTS revision_{tabla}_{accion} AFTER {accion} ON {tabla} BEGIN UPDATE persistencia SET valor=CAST(valor AS INTEGER)+1 WHERE clave='revision'; END")
-        conexion.commit()
     except Exception:
         conexion.close()
         raise
@@ -373,7 +366,7 @@ def valor_objeto_incluido(item_id: str | None) -> int | None:
 
 
 def completar_economia_plan(contexto: dict) -> dict:
-    """Rellena solo huecos desde las bases locales; conserva precios ya guardados."""
+    """Rellena huecos desde las fuentes elegidas; conserva precios ya guardados."""
     if not isinstance(contexto,dict):raise ValueError('Contexto de precios inválido')
     # Validar incluso con la lista vacía y antes de modificar ningún lote.
     base=normalizar_economia_lote(contexto,[])
@@ -400,11 +393,15 @@ def completar_economia_plan(contexto: dict) -> dict:
             faltan_precios=numero(e.get('precio_venta',0),'Precio')<=0 or any(
                 numero(e['precios_materiales'].get(m['id'],0),'Precio')<=0 for m in lote['materiales'])
             if e['modo']!='manual' and faltan_precios:
-                clave=(tuple(ids),e['ciudad_materiales'],lote['item_id'],e['ciudad_objeto'],e['calidad'],e['tipo'])
+                usar_api=e['modo']=='ambos'
+                clave=(tuple(ids),e['ciudad_materiales'],lote['item_id'],e['ciudad_objeto'],e['calidad'],e['tipo'],usar_api)
                 if clave not in cache_lecturas:
                     leidos=consultar_lecturas(DB_PRECIOS,POR_ID,ids,e['ciudad_materiales'],lote['item_id'],
                                              e['ciudad_objeto'],e['calidad'],e['tipo'])
-                    cache_lecturas[clave]={p['id']:p['precio'] for p in leidos['precios']}
+                    if usar_api:agregar_publicos(DB_PRECIOS,leidos)
+                    cache_lecturas[clave]={p['id']:p['precio'] or (
+                        p['publico']['precio'] if p.get('publico',{}).get('vigente') else None)
+                        for p in leidos['precios']}
                 lecturas=cache_lecturas[clave]
             def precio(id):
                 if e['modo']!='manual' and (lecturas.get(id) or 0)>0:return lecturas[id]
@@ -462,6 +459,13 @@ def borrar_lote(lote_id: str) -> dict:
     plan=listar_plan()
     if fila:plan['eliminado']={'id':fila[0],'datos':json.loads(fila[1]),'creado':fila[2]}
     return plan
+
+
+def borrar_todos_lotes() -> dict:
+    """Vacía los lotes en una transacción y conserva los precios y las compras."""
+    with closing(_abrir_precios()) as conexion, conexion:
+        borrados = conexion.execute("DELETE FROM lotes").rowcount
+    return dict(listar_plan(), lotes_borrados=borrados)
 
 
 FORMATO_RESPALDO='benjayaye-craft-calculadora'
@@ -536,14 +540,12 @@ def exportar_respaldo() -> dict:
     """Copia consistente de lotes y precios manuales, sin datos del lector."""
     with closing(_abrir_precios()) as con,con:
         con.execute('BEGIN')
-        revision=int(con.execute("SELECT valor FROM persistencia WHERE clave='revision'").fetchone()[0])
-        generacion=con.execute("SELECT valor FROM persistencia WHERE clave='generacion'").fetchone()[0]
         precios=dict(con.execute('SELECT id,precio FROM precios'))
         lotes=[{'id':id,'datos':json.loads(datos),'creado':creado}
                for id,datos,creado in con.execute('SELECT id,datos,creado FROM lotes ORDER BY rowid')]
         compras=dict(con.execute('SELECT id,cantidad FROM compras_plan'))
     copia={'formato':FORMATO_RESPALDO,'version':1,'creado':datetime.now(timezone.utc).isoformat(),
-           'precios':precios,'lotes':lotes,'generacion':generacion,'revision':revision}
+           'precios':precios,'lotes':lotes}
     if compras:copia['compras']=compras
     return copia
 
@@ -876,13 +878,14 @@ class Manejador(BaseHTTPRequestHandler):
         try:cookies.load(self.headers.get("Cookie",""))
         except (CookieError,ValueError,TypeError):pass
         cookie=cookies.get("benjayaye_acceso")
-        if cookie and hmac.compare_digest(cookie.value,token):return True
+        if cookie and hmac.compare_digest(cookie.value.encode('utf-8'),token.encode('utf-8')):return True
 
         ruta=urllib.parse.urlsplit(self.path)
         clave=urllib.parse.parse_qs(ruta.query).get("acceso",[""])[0]
-        if ruta.path=="/" and clave and hmac.compare_digest(clave,token):
+        if ruta.path=="/" and clave and hmac.compare_digest(clave.encode('utf-8'),token.encode('utf-8')):
             self.send_response(303)
-            self.send_header("Set-Cookie",f"benjayaye_acceso={token}; HttpOnly; SameSite=Strict; Path=/")
+            seguridad='; Secure' if getattr(self.server,'web_alojada',False) else ''
+            self.send_header("Set-Cookie",f"benjayaye_acceso={token}; HttpOnly; SameSite=Strict; Path=/{seguridad}")
             self.send_header("Location","/")
             self.send_header("Cache-Control","no-store")
             self.send_header("Referrer-Policy","no-referrer")
@@ -891,10 +894,6 @@ class Manejador(BaseHTTPRequestHandler):
             return False
         self.send_error(403,"Acceso privado. Abre el enlace que te compartieron.")
         return False
-
-    def end_headers(self):
-        cabeceras_privadas(self)
-        super().end_headers()
 
     def log_message(self, formato: str, *args) -> None:
         """No escribe parámetros de invitación en la consola del servidor."""
@@ -918,15 +917,7 @@ class Manejador(BaseHTTPRequestHandler):
         try:self.wfile.write(contenido)
         except (BrokenPipeError,ConnectionResetError):self.close_connection=True
 
-    def _generacion_privada(self):
-        with closing(_abrir_precios()) as con:
-            return con.execute("SELECT valor FROM persistencia WHERE clave='generacion'").fetchone()[0]
-
     def _json(self, codigo: int, objeto: object) -> None:
-        ruta = urllib.parse.urlsplit(self.path).path
-        if codigo == 200 and isinstance(objeto, dict) and getattr(self, '_respuesta_personal', False):
-            if ruta == '/api/plan' or self.command in ('POST', 'PATCH', 'DELETE'):
-                objeto = dict(objeto, _respaldo=exportar_respaldo())
         contenido=json.dumps(objeto,ensure_ascii=False,separators=(',',':')).encode('utf-8')
         comprimir=len(contenido)>=2048 and acepta_gzip(self.headers.get('Accept-Encoding',''))
         if comprimir:contenido=gzip.compress(contenido,compresslevel=3,mtime=0)
@@ -956,8 +947,9 @@ class Manejador(BaseHTTPRequestHandler):
         except (OSError,sqlite3.Error):pass
         finally:self.close_connection=True
 
-    @espacio_privado
     def do_GET(self) -> None:
+        if self.path == '/salud':
+            self._json(200, {'ok': True});return
         if not self._acceso_compartido_autorizado():return
         ruta = urllib.parse.urlparse(self.path)
         if ruta.path=='/api/plan/compras.csv':
@@ -984,14 +976,26 @@ class Manejador(BaseHTTPRequestHandler):
         if ruta.path == "/api/lector/precios":
             p = urllib.parse.parse_qs(ruta.query)
             try:
-                self._json(200, consultar_lecturas(DB_PRECIOS, POR_ID,
+                lecturas = consultar_lecturas(DB_PRECIOS, POR_ID,
                     p.get('ids', [''])[0].split(','), p.get('ciudad', [''])[0],
                     p.get('objeto', [''])[0], p.get('ciudad_objeto', [''])[0],
-                    int(p.get('calidad', ['1'])[0]), p.get('tipo', ['venta'])[0]))
+                    int(p.get('calidad', ['1'])[0]), p.get('tipo', ['venta'])[0])
+                if p.get('publicos') == ['1']:
+                    agregar_publicos(DB_PRECIOS, lecturas)
+                self._json(200, lecturas)
             except (ValueError, TypeError) as exc:
                 self._json(400, {'error': str(exc)})
             except (sqlite3.Error, OSError):
                 self._json(500, {'error': 'No se pudieron abrir las lecturas guardadas'})
+            return
+        if ruta.path == RUTA_PUBLICOS:
+            p = urllib.parse.parse_qs(ruta.query)
+            try:
+                self._json(200, consultar_cotizaciones(DB_PRECIOS, POR_ID, p.get('item_id',[''])[0]))
+            except ValueError as exc:
+                self._json(400, {'error': str(exc)})
+            except (sqlite3.Error, OSError):
+                self._json(503, {'error': 'No se pudieron abrir los precios públicos guardados.'})
             return
         if ruta.path == "/api/mercado":
             parametros = urllib.parse.parse_qs(ruta.query)
@@ -1059,7 +1063,6 @@ class Manejador(BaseHTTPRequestHandler):
             "/": ("web/index.html", "text/html; charset=utf-8"),
             "/web/estilos.css": ("web/estilos.css", "text/css; charset=utf-8"),
             "/web/app.js": ("web/app.js", "text/javascript; charset=utf-8"),
-            "/web/persistencia.js": ("web/persistencia.js", "text/javascript; charset=utf-8"),
             "/web/plan.js": ("web/plan.js", "text/javascript; charset=utf-8"),
             "/web/fondo-n12.jpg": ("web/fondo-n12.jpg", "image/jpeg"),
         }
@@ -1069,49 +1072,38 @@ class Manejador(BaseHTTPRequestHandler):
         archivo, tipo = static[ruta.path]
         enviar_archivo(self,ROOT / archivo,tipo)
 
-    def _recibir_sincronizacion(self):
-        from sincronizacion_web import clave_configurada, recibir
-        clave = clave_configurada()
-        if not clave:
-            self._json(503, {'error': 'Configura BENJAYAYE_SYNC_KEY con al menos 32 caracteres ASCII'})
-            return
-        autorizacion = self.headers.get('Authorization', '')
-        if not hmac.compare_digest(autorizacion.encode('utf-8'), ('Bearer ' + clave).encode('utf-8')):
-            self._json(401, {'error': 'Clave de sincronización incorrecta'})
-            return
+    def _recibir_api_publica(self):
+        token = os.environ.get('BENJAYAYE_API_SYNC_TOKEN', '')
+        if not token_valido(token):
+            self._json(503, {'error': 'La sincronización remota de la API no está configurada.'});return
+        recibido = self.headers.get('Authorization', '')
+        if not hmac.compare_digest(recibido.encode('utf-8'), ('Bearer '+token).encode('utf-8')):
+            self._json(401, {'error': 'Token de sincronización incorrecto.'});return
         try:
             tamano = int(self.headers.get('Content-Length', '0'))
-            if not 0 < tamano <= 150000:
-                raise ValueError('Solicitud demasiado grande o vacía')
-            self.connection.settimeout(15)
+            if not 0 < tamano <= MAX_BYTES_API or self.headers.get_content_type() != 'application/json':
+                raise ValueError('El envío debe ser un lote JSON de tamaño válido.')
+            self.connection.settimeout(10)
             datos = json.loads(self.rfile.read(tamano))
-            self._json(200, recibir(DB_PRECIOS, POR_ID, datos))
-        except (ValueError, TypeError, UnicodeError):
-            self._json(400, {'error': 'Datos de sincronización inválidos'})
-        except (OSError, sqlite3.Error):
-            self._json(503, {'error': 'No se pudo guardar; se reintentará'})
+            self._json(200, recibir_cotizaciones(DB_PRECIOS, POR_ID, datos))
+        except (ValueError, TypeError, UnicodeError) as exc:
+            self._json(400, {'error': 'Envío JSON inválido.' if isinstance(exc,(json.JSONDecodeError,UnicodeError)) else str(exc)})
+        except (sqlite3.Error, OSError):
+            self._json(503, {'error': 'No se pudieron guardar las cotizaciones. Reintenta más tarde.'})
 
-    @espacio_privado
     def do_POST(self) -> None:
-        if self.path == '/api/sync/precios':
-            self._recibir_sincronizacion()
-            return
+        if self.path == RUTA_ENVIO_API:
+            self._recibir_api_publica();return
         if not self._acceso_compartido_autorizado():return
-        if self.path not in ("/api/calcular", "/api/precios", "/api/plan", '/api/respaldo/importar', '/api/respaldo/recuperar'):
+        if self.path not in ("/api/calcular", "/api/precios", "/api/plan", '/api/respaldo/importar'):
             self.send_error(404)
             return
         try:
             tamano = int(self.headers.get("Content-Length", "0"))
-            if not 0 < tamano <= (16*1024*1024 if self.path.startswith('/api/respaldo/') else 65536):
+            if not 0 < tamano <= (16*1024*1024 if self.path=='/api/respaldo/importar' else 65536):
                 raise ValueError("Solicitud demasiado grande o vacía")
             datos = json.loads(self.rfile.read(tamano))
-            if self.path == '/api/respaldo/recuperar':
-                actual = exportar_respaldo()
-                if not self.headers.get('X-Craft-Generation') or actual['lotes'] or actual['precios'] or actual.get('compras'):
-                    self._json(409, {'error': 'Este espacio ya contiene datos. Conservamos tu copia local; descarga el respaldo antes de combinarlo manualmente.'})
-                    return
-                self._json(200, importar_respaldo(datos))
-            elif self.path == '/api/respaldo/importar':
+            if self.path == '/api/respaldo/importar':
                 self._json(200,importar_respaldo(datos))
             elif self.path == "/api/plan":
                 self._json(200, guardar_lote(datos))
@@ -1126,7 +1118,6 @@ class Manejador(BaseHTTPRequestHandler):
         except (sqlite3.Error, OSError):
             self._json(500, {"error": "No se pudieron guardar los datos. Comprueba que la carpeta permita escritura."})
 
-    @espacio_privado
     def do_PATCH(self) -> None:
         if not self._acceso_compartido_autorizado():return
         if self.path not in ('/api/plan','/api/plan/completar','/api/plan/compras'):self.send_error(404);return
@@ -1148,17 +1139,20 @@ class Manejador(BaseHTTPRequestHandler):
         except (ValueError,TypeError,json.JSONDecodeError) as exc:self._json(400,{'error':str(exc)})
         except (sqlite3.Error,OSError):self._json(500,{'error':'No se pudieron guardar los precios del lote'})
 
-    @espacio_privado
     def do_DELETE(self) -> None:
         if not self._acceso_compartido_autorizado():return
         ruta = urllib.parse.urlparse(self.path)
-        if ruta.path not in ("/api/precios", "/api/plan", '/api/plan/compras'):
+        if ruta.path not in ("/api/precios", "/api/plan", "/api/plan/lotes", '/api/plan/compras'):
             self.send_error(404)
             return
         try:
             parametros = urllib.parse.parse_qs(ruta.query)
             if ruta.path == '/api/plan/compras':
                 self._json(200,desmarcar_compras())
+            elif ruta.path == "/api/plan/lotes":
+                if ruta.query:
+                    raise ValueError("El borrado de todos los lotes no admite filtros")
+                self._json(200, borrar_todos_lotes())
             elif ruta.path == "/api/plan":
                 self._json(200, borrar_lote(parametros.get("lote_id", [""])[0]))
             else:
@@ -1196,21 +1190,35 @@ def iniciar() -> None:
     import argparse
 
     parser = argparse.ArgumentParser(description="Calculadora local de Albion Online")
-    parser.add_argument("--puerto", type=int, default=8501, help="Puerto local (0 para uno libre)")
+    parser.add_argument("--puerto", type=int, help="Puerto de escucha (8501 por defecto en local)")
     parser.add_argument("--sin-navegador", action="store_true", help="No abrir el navegador automáticamente")
-    parser.add_argument("--compartir-red-local",action="store_true",
+    modo=parser.add_mutually_exclusive_group()
+    modo.add_argument("--compartir-red-local",action="store_true",
                         help="Permite abrir la página desde otros dispositivos de tu misma red Wi-Fi/LAN")
+    modo.add_argument("--web-alojada", action="store_true", help="Usa PORT y acceso privado en un servicio HTTPS")
     args = parser.parse_args()
-    host="0.0.0.0" if args.compartir_red_local else "127.0.0.1"
+    host="0.0.0.0" if args.compartir_red_local or args.web_alojada else "127.0.0.1"
+    if args.web_alojada:
+        token=os.environ.get('BENJAYAYE_ACCESO_WEB','')
+        if not token_valido(token) or token == os.environ.get('BENJAYAYE_API_SYNC_TOKEN'):
+            parser.error('Configura BENJAYAYE_ACCESO_WEB con una clave privada distinta del token de sincronización.')
+        try:puerto=int(os.environ.get('PORT','10000')) if args.puerto is None else args.puerto
+        except ValueError:parser.error('PORT debe contener un número de puerto.')
+    else:
+        token=secrets.token_urlsafe(24) if args.compartir_red_local else None
+        puerto=8501 if args.puerto is None else args.puerto
     try:
-        servidor = ThreadingHTTPServer((host, args.puerto), Manejador)
+        servidor = ThreadingHTTPServer((host, puerto), Manejador)
     except OSError:
+        if args.web_alojada:raise
         servidor = ThreadingHTTPServer((host, 0), Manejador)
-    token=secrets.token_urlsafe(24) if args.compartir_red_local else None
     servidor.token_compartir=token
+    servidor.web_alojada=args.web_alojada
     clave="?acceso="+urllib.parse.quote(token,safe="") if token else ""
     direccion = f"http://127.0.0.1:{servidor.server_port}/{clave}"
-    if args.compartir_red_local:
+    if args.web_alojada:
+        print(f'Calculadora alojada en el puerto {servidor.server_port}.',flush=True)
+    elif args.compartir_red_local:
         ips=direcciones_privadas_ipv4()
         enlaces="\n".join(f"  http://{ip}:{servidor.server_port}/?acceso={urllib.parse.quote(token,safe='')}" for ip in ips)
         print("\nCalculadora de Albion compartida en tu red local.",flush=True)
@@ -1220,7 +1228,7 @@ def iniciar() -> None:
         print("El enlace permite editar los datos compartidos. Mantén abierta esta ventana; el enlace deja de funcionar al cerrar el programa.\n",flush=True)
     else:
         print(f"\nCalculadora de Albion lista: {direccion}\nCierra con Ctrl+C.\n", flush=True)
-    if not args.sin_navegador:
+    if not args.sin_navegador and not args.web_alojada:
         import threading
 
         threading.Timer(0.6, lambda: webbrowser.open(direccion)).start()

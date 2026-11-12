@@ -1,4 +1,10 @@
-BENJAYAYE CRAFT — SOLO PÁGINA WEB V54
+BENJAYAYE CRAFT — SOLO PÁGINA WEB V67
+
+Entra a Mercado desde el menú. Para vaciar el plan, usa Acumulado >
+Borrar todos los lotes. Más detalles en CAMBIOS_V67.md.
+
+Para recibir precios del lector V66 en tu web de Render, lee
+SINCRONIZAR_API_V66.md. En el mismo equipo se sincronizan al analizar.
 
 1. Extrae completamente esta carpeta del ZIP.
 2. Necesitas Python 3.10 o superior. No requiere instalar paquetes con pip.

@@ -9,6 +9,7 @@ from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from almacenamiento import conectar_base
+from mercancias import calidad_mercado
 
 CIUDADES_LECTOR = ('Martlock', 'Bridgewatch', 'Lymhurst', 'Fort Sterling', 'Thetford', 'Caerleon', 'Brecilien', 'Black Market')
 
@@ -59,6 +60,7 @@ def guardar_lectura(db, catalogo, datos):
     id, ciudad, calidad = datos.get('item_id'), datos.get('ciudad'), datos.get('calidad')
     if id not in catalogo or ciudad not in CIUDADES_LECTOR or type(calidad) is not int or not 1 <= calidad <= 5:
         raise ValueError('Revisa objeto, mercado y calidad antes de guardar')
+    calidad = calidad_mercado(id, calidad)
     precios = []
     for campo in ('venta', 'compra'):
         valor = datos.get(campo)
@@ -114,7 +116,7 @@ def consultar_lecturas(db, catalogo, ids, ciudad, objeto, ciudad_objeto, calidad
     with closing(abrir(db)) as con:
         for id in dict.fromkeys(ids):
             es_objeto = id == objeto
-            mercado, nivel, lado = (ciudad_objeto, calidad, tipo) if es_objeto else (ciudad, 1, 'venta')
+            mercado, nivel, lado = (ciudad_objeto, calidad_mercado(id, calidad), tipo) if es_objeto else (ciudad, 1, 'venta')
             fila = con.execute('SELECT venta, compra, fecha, metodo FROM precios_lector WHERE item_id=? AND ciudad=? AND calidad=?',
                                (id, mercado, nivel)).fetchone()
             precio = fila[0 if lado == 'venta' else 1] if fila else None

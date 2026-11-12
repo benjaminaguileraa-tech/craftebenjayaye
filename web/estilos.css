@@ -217,6 +217,8 @@ button:disabled{opacity:.5;cursor:wait}
 .devolucion-lote{display:block;margin-top:8px;color:#aec9dc;font-size:11px}
 .boton-quitar-lote{background:#453344;border:1px solid #8e657b;border-radius:8px;padding:8px 10px;color:#ffccd7;font-size:12px;white-space:nowrap}
 .boton-quitar-lote:hover{background:#64384c}
+.boton-borrar-todos{border-color:#a56c82;background:#4b2b3d;color:#ffdae3}
+.boton-borrar-todos:not(:disabled):hover{background:#69384e}
 @media(max-width:1000px){.topbar{flex-wrap:wrap}.topbar nav{gap:13px;flex-wrap:wrap;justify-content:flex-end;margin-left:auto}.estado-guardado{text-align:left}}
 @media(max-width:700px){.metricas-plan{gap:7px}.metricas-plan>div{padding:12px 8px}.metricas-plan strong{font-size:24px}.metricas-plan span{font-size:10px}.estado-plan-fila{align-items:start;flex-direction:column;gap:0}.boton-guardar-lote{padding:9px 12px;font-size:12px}.objetos-plan{grid-template-columns:1fr}.plan-vacio{padding:20px 12px}}
 
@@ -271,6 +273,8 @@ button:disabled{opacity:.5;cursor:wait}
 .mercado-controles select{min-width:165px}
 #estado-mercado{color:#9ceaff;font-size:13px;line-height:1.5;margin:14px 0}
 .mercado-panel summary{cursor:pointer;font-size:13px;color:#c6dded}
+.cotizaciones-api-filtros{margin:12px 0 6px}
+#detalle-api-publica .tabla-scroll{margin-top:8px}
 .precio-antiguo{color:#ffd478}
 input[readonly]{opacity:.8;cursor:default}
 

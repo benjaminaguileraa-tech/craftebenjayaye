@@ -4,9 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#11151c">
-  <title>Benjayaye Craft V54 · Calculadora de Albion Online</title>
+  <title>Benjayaye Craft V67 · Calculadora de Albion Online</title>
   <link rel="stylesheet" href="/web/estilos.css">
-  <script src="/web/persistencia.js" defer></script>
   <script src="/web/plan.js" defer></script>
   <script src="/web/mercado.js" defer></script>
   <script src="/web/app.js" defer></script>
@@ -19,6 +18,7 @@
       <nav aria-label="Navegación">
         <a href="#calculadora">Calculadora</a>
         <a href="#precios">Precios guardados</a>
+        <a href="#mercado">Mercado</a>
         <a href="#receta">Receta</a>
         <a href="#plan">Acumulado</a>
         <button id="guardar-lote" class="boton-guardar-lote" type="button" disabled><span aria-hidden="true">＋</span> Guardar crafteo</button>
@@ -30,24 +30,6 @@
       <div class="cabecera-calculadora"><p class="sobretitulo">TU TALLER · AMÉRICAS</p><span id="canal-local" class="canal-local" role="status" data-estado="espera">Conectando con tus datos…</span></div>
       <h1>Calculadora de crafteo <span>Albion Online</span></h1>
       <p class="subtitulo">Busca el objeto por nombre, elige tier, encantamiento y calidad, y calcula tus ganancias.</p>
-      <section class="seccion-materiales mercado-panel" aria-label="Precios de mercado de Américas">
-        <div class="mercado-controles">
-          <div><strong>Mercado · Américas · V54</strong><small id="detalle-fuente-mercado">Lector de pantalla y precios guardados</small></div>
-          <div><label class="etiqueta" for="ciudad-mercado">CIUDAD DE MATERIALES</label><select id="ciudad-mercado"><option>Martlock</option><option>Bridgewatch</option><option>Lymhurst</option><option>Fort Sterling</option><option>Thetford</option><option>Caerleon</option><option>Brecilien</option><option value="Black Market">Mercado Negro (Caerleon)</option></select></div>
-          <div><label class="etiqueta" for="modo-mercado">PRECIOS</label><select id="modo-mercado"><option value="lector">Lector de pantalla</option><option value="manual">Guardados manualmente</option><option value="ambos">Ambos</option></select></div>
-          <button id="actualizar-mercado" class="boton-secundario" type="button">Actualizar precios</button>
-        </div>
-        <div id="opciones-lector" class="mercado-controles" hidden>
-          <div><label class="etiqueta" for="ciudad-objeto-lector">MERCADO DEL OBJETO</label><select id="ciudad-objeto-lector"><option>Martlock</option><option>Bridgewatch</option><option>Lymhurst</option><option>Fort Sterling</option><option>Thetford</option><option>Caerleon</option><option>Brecilien</option><option value="Black Market" selected>Mercado Negro (Caerleon)</option></select></div>
-          <div><label class="etiqueta" for="tipo-lector">PRECIO PARA VENDER EL OBJETO</label><select id="tipo-lector"><option value="venta">Oferta de venta (publicar)</option><option value="compra">Orden de compra (venta inmediata)</option></select></div>
-          <p class="nota-receta-precios">La ciudad superior corresponde a los materiales; aquí eliges el mercado del objeto fabricado. Su calidad se selecciona en la tarjeta del objeto. El lector guarda tras dos lecturas fiables iguales o al pulsar Confirmar y pasar a la web. Mantén visible la primera fila del mercado.</p>
-        </div>
-        <p id="estado-mercado" role="status">Preparando precios…</p>
-        <p id="conexion-lector" class="nota-receta-precios" role="status"></p>
-        <details><summary>Ver precios, origen y lecturas disponibles</summary><div class="tabla-scroll"><table><thead><tr><th>Objeto / material</th><th>Precio unitario</th><th>Origen / fecha / coincidencia</th></tr></thead><tbody id="precios-mercado"></tbody></table></div></details>
-        <p class="nota-receta-precios">En Ambos se usa primero una lectura del mismo objeto, tier, encantamiento, ciudad y calidad; si falta, se usa el precio guardado manualmente. Las lecturas se actualizan al recibir cambios del lector. Los precios manuales son personales y no distinguen ciudad.</p>
-      </section>
-
       <section class="accesos-recientes" aria-label="Objetos recientes">
         <div><span>Volver a un objeto</span><small id="estado-recetas-locales" role="status">Preparando las recetas incluidas…</small></div>
         <div id="objetos-recientes" class="objetos-recientes"><small>Tus últimas selecciones aparecerán aquí.</small></div>
@@ -186,7 +168,7 @@
           <div><p class="sobretitulo">BASE DE PRECIOS</p><h2>Precios guardados de materiales</h2></div>
           <strong id="total-precios" class="contador-precios">0 precios guardados</strong>
         </div>
-        <p class="aviso-receta">Estos precios se usan en «Guardados manualmente» y, cuando falta una lectura, en «Ambos». Busca un material, artefacto u objeto, escribe su precio y guárdalo. Son precios personales sin ciudad; el lector no los reemplaza.</p>
+        <p class="aviso-receta">Estos precios se usan en «Guardados manualmente» y, si faltan precios del lector y de la API, en «Ambos». Busca un material, artefacto u objeto, escribe su precio y guárdalo. Son precios personales sin ciudad.</p>
         <div class="agregar-material">
           <div class="buscador">
             <label for="buscar-material" class="etiqueta">BUSCAR MATERIAL PARA GUARDAR SU PRECIO</label>
@@ -209,6 +191,33 @@
           </table>
         </div>
         <button id="ver-mas-precios" class="boton-secundario" type="button" hidden>Mostrar 60 más</button>
+      </section>
+
+      <section id="mercado" class="seccion-materiales mercado-panel" aria-label="Precios de mercado de Américas">
+        <div class="mercado-controles">
+          <div><strong>Mercado · Américas · V67</strong><small id="detalle-fuente-mercado">Lector, API sincronizada y precios guardados</small></div>
+          <div><label class="etiqueta" for="ciudad-mercado">CIUDAD DE MATERIALES</label><select id="ciudad-mercado"><option>Martlock</option><option>Bridgewatch</option><option>Lymhurst</option><option>Fort Sterling</option><option>Thetford</option><option>Caerleon</option><option>Brecilien</option><option value="Black Market">Mercado Negro (Caerleon)</option></select></div>
+          <div><label class="etiqueta" for="modo-mercado">PRECIOS</label><select id="modo-mercado"><option value="lector">Lector de pantalla</option><option value="manual">Guardados manualmente</option><option value="ambos">Ambos</option></select></div>
+          <button id="actualizar-mercado" class="boton-secundario" type="button">Actualizar precios</button>
+        </div>
+        <div id="opciones-lector" class="mercado-controles" hidden>
+          <div><label class="etiqueta" for="ciudad-objeto-lector">MERCADO DEL OBJETO</label><select id="ciudad-objeto-lector"><option>Martlock</option><option>Bridgewatch</option><option>Lymhurst</option><option>Fort Sterling</option><option>Thetford</option><option>Caerleon</option><option>Brecilien</option><option value="Black Market" selected>Mercado Negro (Caerleon)</option></select></div>
+          <div><label class="etiqueta" for="tipo-lector">PRECIO PARA VENDER EL OBJETO</label><select id="tipo-lector"><option value="venta">Oferta de venta (publicar)</option><option value="compra">Orden de compra (venta inmediata)</option></select></div>
+          <p class="nota-receta-precios">La ciudad superior corresponde a los materiales; aquí eliges el mercado del objeto fabricado. Su calidad se selecciona en la tarjeta del objeto. El lector guarda tras dos lecturas fiables iguales o al pulsar Confirmar y pasar a la web. Mantén visible la primera fila del mercado.</p>
+        </div>
+        <p id="estado-mercado" role="status">Preparando precios…</p>
+        <p id="conexion-lector" class="nota-receta-precios" role="status"></p>
+        <details><summary>Ver precios, origen y lecturas disponibles</summary><div class="tabla-scroll"><table><thead><tr><th>Objeto / material</th><th>Precio unitario</th><th>Origen / fecha / coincidencia</th></tr></thead><tbody id="precios-mercado"></tbody></table></div></details>
+        <details id="detalle-api-publica">
+          <summary>Ver cotizaciones sincronizadas de la API</summary>
+          <form id="formulario-api-publica" class="mercado-controles cotizaciones-api-filtros">
+            <div><label class="etiqueta" for="objeto-api-publica">ID DEL OBJETO</label><input id="objeto-api-publica" type="text" maxlength="160" autocomplete="off" spellcheck="false" placeholder="Ej.: T4_ARMOR_LEATHER_SET3"></div>
+            <button class="boton-secundario" type="submit">Consultar cotizaciones</button>
+          </form>
+          <p id="estado-api-publica" class="nota-receta-precios" role="status"></p>
+          <div class="tabla-scroll"><table><thead><tr><th>Ciudad</th><th>Calidad</th><th>Oferta mínima</th><th>Oferta máxima</th><th>Orden mínima</th><th>Orden máxima</th></tr></thead><tbody id="filas-api-publica"></tbody></table></div>
+        </details>
+        <p class="nota-receta-precios">En Ambos se usa primero una lectura que coincida con el objeto, variante, ciudad y calidad. Si falta, se usa la API sincronizada de las últimas 24 h o el precio manual. Puedes elegir Guardados manualmente para usar tus precios personales.</p>
       </section>
 
       <section id="receta" class="seccion-materiales seccion-receta">
@@ -246,7 +255,7 @@
 
       <section id="acerca" class="pie-ayuda">
         <h2>Cómo usarla</h2>
-        <p>Busca el objeto arriba, elige tier y encantamiento e introduce su precio de venta. Registra una vez los precios de los materiales en la base inferior: se guardan en tu espacio privado y aparecen automáticamente arriba cuando seleccionas otra receta. También puedes cambiarlos arriba; esos cambios se guardan al salir del campo. Verifica las cantidades antes de fabricar.</p>
+        <p>Busca el objeto arriba, elige tier y encantamiento e introduce su precio de venta. Registra una vez los precios de los materiales en la base inferior: se guardan en este equipo y aparecen automáticamente arriba cuando seleccionas otra receta. También puedes cambiarlos arriba; esos cambios se guardan al salir del campo. Verifica las cantidades antes de fabricar.</p>
         <p>Hay 2.501 iconos locales. Para otros objetos, la imagen se solicita al render oficial de Albion si hay conexión.</p>
         <p>Para cocinar, elige «Comidas» en el catálogo y busca por nombre. Introduce el número de crafteos y el precio de venta de una comida. Los ingredientes se indican por crafteo; el panel muestra cuántas comidas obtendrás. Las 219 recetas incluidas funcionan sin conexión.</p>
       </section>
@@ -256,15 +265,14 @@
           <div><p class="sobretitulo">TUS CRAFTEOS GUARDADOS</p><h2 id="titulo-plan">Materiales acumulados</h2></div>
           <a class="boton-secundario volver-calculadora" href="#calculadora">Añadir otro crafteo ↑</a>
         </div>
-        <p class="nota-receta-precios" id="privacidad-plan">Tus crafteos, compras y precios manuales son privados para este navegador. Otras personas que abran el enlace tendrán su propia lista. Se guarda una copia automática en este navegador para recuperarlos si el servidor se reinicia. Para cambiar de dispositivo, descarga un respaldo JSON. No borres los datos del sitio ni uses modo incógnito para conservar esta copia.</p>
         <p class="aviso-receta">Cada guardado añade el lote y su porcentaje de devolución. La cantidad a comprar descuenta los materiales devueltos y se redondea a un entero. Los artefactos no reciben devolución. El tier y el encantamiento se contabilizan por separado.</p>
         <div class="metricas-plan">
           <div><strong id="total-lotes-plan">0</strong><span>Lotes guardados</span></div>
           <div><strong id="total-items-plan">0</strong><span>Ítems a craftear</span></div>
           <div><strong id="total-materiales-plan">0</strong><span>Tipos de material</span></div>
         </div>
-        <div class="estado-plan-fila"><p id="estado-plan" role="status">Cargando tus lotes guardados…</p><button id="deshacer-lote" type="button" class="boton-secundario" hidden>Deshacer último borrado</button><button id="completar-plan" class="boton-secundario" type="button" disabled>Completar precios faltantes</button><button id="recargar-plan" class="boton-secundario" type="button">Actualizar lista</button></div>
-        <p class="nota-receta-precios">Completar precios busca solo los datos vacíos en tus bases del lector y manuales, según la fuente, ciudad y calidad guardadas en cada lote. Los lotes antiguos usan la selección actual de la calculadora.</p>
+        <div class="estado-plan-fila"><p id="estado-plan" role="status">Cargando tus lotes guardados…</p><button id="deshacer-lote" type="button" class="boton-secundario" hidden>Deshacer último borrado</button><button id="completar-plan" class="boton-secundario" type="button" disabled>Completar precios faltantes</button><button id="recargar-plan" class="boton-secundario" type="button">Actualizar lista</button><button id="borrar-todos-lotes" class="boton-secundario boton-borrar-todos" type="button" disabled>Borrar todos los lotes</button></div>
+        <p class="nota-receta-precios">Completar precios rellena solo los datos vacíos, según la fuente, ciudad y calidad guardadas en cada lote. En Ambos puede usar la API sincronizada. Los lotes antiguos usan la selección actual de la calculadora.</p>
         <div id="plan-vacio" class="plan-vacio" hidden>No tienes crafteos guardados todavía. Elige un objeto y su cantidad arriba y pulsa <strong>Guardar crafteo</strong>.</div>
         <div id="plan-contenido" hidden>
           <h3>Objetos a craftear</h3>
@@ -312,9 +320,8 @@
         </div>
         <p class="nota-receta-precios">Los precios y costes guardados se conservan. Si falta el valor del objeto y está incluido en la aplicación, se usa automáticamente para calcular la estación. Los totales incluyen todos los lotes; cualquier importe parcial se indica expresamente. Las ganancias se basan en el consumo neto estimado, antes de redondear las unidades a comprar.</p>
         <details class="respaldo-datos"><summary>Respaldo y recuperación de la calculadora</summary>
-          <p>Descarga tus lotes privados, precios manuales y cantidades compradas para guardarlos o llevarlos a otro navegador o computadora. Al recuperar se añaden solo los datos ausentes; los actuales se conservan. El respaldo no incluye las lecturas ni la configuración del lector.</p>
-          <p id="estado-persistencia" role="status" aria-live="polite">Preparando copia automática…</p>
-          <a id="descargar-respaldo-local" class="boton-secundario" href="/api/respaldo" download>Descargar respaldo JSON</a>
+          <p>Descarga tus lotes, precios manuales y cantidades compradas para guardarlos o llevarlos a otra computadora. Al recuperar se añaden solo los datos ausentes; los actuales se conservan. El respaldo no incluye las lecturas ni la configuración del lector.</p>
+          <a class="boton-secundario" href="/api/respaldo" download>Descargar respaldo JSON</a>
           <div class="herramientas-respaldo"><label for="archivo-respaldo">Elegir un respaldo JSON<input id="archivo-respaldo" type="file" accept=".json,application/json"></label><button id="restaurar-respaldo" class="boton-secundario" type="button" disabled>Recuperar datos ausentes</button></div>
           <p id="estado-respaldo" role="status">Puedes recuperar el mismo respaldo varias veces sin duplicar tus lotes.</p>
         </details>

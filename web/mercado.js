@@ -6,10 +6,14 @@ const mercado = {modo: 'ambos', proximaConsulta: 0, cargando: false, automatico:
 const nombresCalidad = ['Sin reconocer', 'Normal', 'Bueno', 'Notable', 'Sobresaliente', 'Obra maestra'];
 const nombreCiudad = ciudad => ciudad === 'Black Market' ? 'Mercado Negro (Caerleon)' : ciudad;
 const idsMercado = () => [...new Set([estado.id, ...estado.materiales.map(m => m.id)].filter(Boolean))];
+const camposPrecioApi = ['sell_price_min', 'sell_price_max', 'buy_price_min', 'buy_price_max'];
 
 function datoPrecio(id) {
   const lectura = mercado.precios.get(id);
   if (mercado.modo !== 'manual' && lectura?.precio > 0) return lectura;
+  if (mercado.modo === 'ambos' && lectura?.publico?.vigente && lectura.publico.precio > 0) {
+    return {...lectura.publico, api: true};
+  }
   if (mercado.modo !== 'lector') {
     const precio = id === estado.id && mercado.ventasManuales.has(id)
       ? mercado.ventasManuales.get(id) : estado.precios.get(id);
@@ -28,7 +32,8 @@ function actualizarAvisoPrecioVenta() {
   }
 }
 function precioEsSoloLectura(id) {
-  return mercado.modo === 'lector' || (mercado.modo === 'ambos' && mercado.precios.get(id)?.precio > 0);
+  const dato = datoPrecio(id);
+  return mercado.modo === 'lector' || (mercado.modo === 'ambos' && dato.precio > 0 && !dato.manual);
 }
 function hayEdicionPrecio() {
   const activo = document.activeElement;
@@ -72,13 +77,15 @@ function pintarPreciosMercado(ids) {
     const detalle = document.createElement('td');
     if (dato.manual) detalle.textContent = 'Guardado manualmente · precio personal sin ciudad';
     else if (dato.precio > 0) {
-      detalle.textContent = `Lector · ${nombreCiudad(dato.ciudad)} · ${nombresCalidad[dato.calidad]} · ${dato.tipo === 'compra' ? 'orden de compra' : 'oferta de venta'}`;
+      detalle.textContent = `${dato.api ? 'API · Albion Online Data Project' : 'Lector'} · ${nombreCiudad(dato.ciudad)} · ${nombresCalidad[dato.calidad]} · ${dato.tipo === 'compra' ? 'orden de compra' : 'oferta de venta'}`;
       if (dato.fecha) {
         detalle.textContent += ' · ' + new Date(dato.fecha).toLocaleString('es-CL');
         if (Date.now() - Date.parse(dato.fecha) > 86400000) {
           detalle.textContent += ' · Más de 24 h'; detalle.className = 'precio-antiguo';
         }
       }
+    } else if (mercado.modo === 'ambos' && lectura?.publico && !lectura.publico.vigente) {
+      detalle.textContent = 'La API tiene un precio de hace más de 24 h. Puedes verlo en las cotizaciones sincronizadas.';
     } else if (mercado.modo !== 'manual' && lectura?.disponibles?.length) {
       const lado = lectura.tipo === 'compra' ? 'compra' : 'venta';
       const exacta = lectura.disponibles.find(p => p.ciudad === lectura.ciudad && p.calidad === lectura.calidad);
@@ -91,7 +98,7 @@ function pintarPreciosMercado(ids) {
       }
     } else detalle.textContent = mercado.modo === 'manual'
       ? 'No existe precio guardado. El campo de la calculadora queda en 0; guarda un precio en tu base.'
-      : 'No existe precio guardado para esta ciudad y calidad. Se coloca 0 hasta confirmar una lectura.';
+      : 'No existe precio para esta ciudad y calidad. Se coloca 0 hasta que haya un dato que coincida.';
     fila.append(nombre, precio, detalle); cuerpo.append(fila);
   }
 }
@@ -101,7 +108,9 @@ function mostrarConexionLector(datos) {
   if (panel.hidden) return;
   const lectura = datos?.estado_lector || datos?.ultima_guardada;
   if (!lectura) {
-    panel.textContent = 'Todavía no se recibieron lecturas. Abre el lector actualizado: confirma una lectura o inicia el guardado automático. Si tienes precios en otra versión, usa Importar precios en el lector.';
+    panel.textContent = mercado.modo === 'ambos'
+      ? 'Todavía no hay lecturas de pantalla. En Ambos puedes usar las cotizaciones sincronizadas desde el Analizador.'
+      : 'Todavía no hay lecturas de pantalla. Confirma una lectura o inicia el guardado automático.';
     return;
   }
   const id = lectura.item_id || lectura.base_id;
@@ -117,6 +126,48 @@ async function pedirJSON(url, signal) {
   if (!respuesta.ok) throw new Error(datos.error || 'No se pudieron consultar los precios');
   return datos;
 }
+function iniciarConsultaApi() {
+  const seccion = $('detalle-api-publica'), formulario = $('formulario-api-publica');
+  if (!seccion || !formulario) return;
+  const entrada = $('objeto-api-publica'), cuerpo = $('filas-api-publica'), estadoApi = $('estado-api-publica');
+  let consulta;
+  const actualizar = async () => {
+    const id = entrada.value.trim().toUpperCase();
+    consulta?.abort();
+    cuerpo.replaceChildren();
+    if (!id) { estadoApi.textContent = 'Escribe el ID de un objeto. Puedes copiarlo del Analizador.'; return; }
+    const actual = new AbortController(); consulta = actual;
+    estadoApi.textContent = 'Buscando cotizaciones sincronizadas…';
+    try {
+      const datos = await pedirJSON('/api/mercado/publicos?' + new URLSearchParams({item_id:id}), actual.signal);
+      if (consulta !== actual || actual.signal.aborted) return;
+      for (const dato of datos.cotizaciones) {
+        const fila = document.createElement('tr');
+        const celdas = [nombreCiudad(dato.ciudad), nombresCalidad[dato.calidad],
+          ...camposPrecioApi.map(k => {
+            const p = dato[k];
+            return p ? `${dinero(p.precio)} · ${new Date(p.fecha).toLocaleString('es-CL')}` : '—';
+          })];
+        for (const valor of celdas) {
+          const td = document.createElement('td'); td.textContent = valor; fila.append(td);
+        }
+        cuerpo.append(fila);
+      }
+      estadoApi.textContent = datos.cotizaciones.length
+        ? `${datos.cotizaciones.length} combinación(es) de ciudad y calidad para ${id} · ${datos.fuente}.`
+        : `Todavía no hay cotizaciones sincronizadas para ${id}.`;
+    } catch (error) {
+      if (consulta === actual && error.name !== 'AbortError') estadoApi.textContent = error.message;
+    }
+  };
+  formulario.addEventListener('submit', e => { e.preventDefault(); actualizar(); });
+  seccion.addEventListener('toggle', () => {
+    if (seccion.open) {
+      if (!entrada.value) entrada.value = estado.id || '';
+      actualizar();
+    } else consulta?.abort();
+  });
+}
 async function actualizarMercado(opciones = {}) {
   if (!estado.id || $('consultar-receta').disabled) return;
   if(typeof actualizarHistorialMercado==='function')actualizarHistorialMercado();
@@ -130,6 +181,7 @@ async function actualizarMercado(opciones = {}) {
   try {
     const parametros = new URLSearchParams({ciudad: mercado.ciudad, ids: ids.join(','), objeto: estado.id,
       ciudad_objeto: $('ciudad-objeto-lector').value, calidad: $('calidad-lector').value, tipo: $('tipo-lector').value});
+    if (modo === 'ambos') parametros.set('publicos', '1');
     const refrescarManuales = opciones?.forzar === true || !mercado.manualesActualizados || Date.now()-mercado.manualesActualizados>=2000;
     const resultados = await Promise.allSettled([
       refrescarManuales ? pedirJSON('/api/precios', controlador.signal) : Promise.resolve(null),
@@ -151,11 +203,12 @@ async function actualizarMercado(opciones = {}) {
     aplicarPreciosMercado(false, 0); pintarPreciosMercado(ids);
     const fallos = resultados.filter(r => r.status === 'rejected' && r.reason?.name !== 'AbortError');
     const usados = ids.map(datoPrecio), faltan = usados.filter(p => !p.precio).length;
-    const lectores = usados.filter(p => p.precio && !p.manual).length, manual = usados.filter(p => p.manual).length;
-    $('estado-mercado').textContent = `${lectores} precio(s) del lector · ${manual} guardado(s) manualmente. `
+    const lectores = usados.filter(p => p.precio && !p.manual && !p.api).length;
+    const publicos = usados.filter(p => p.api).length, manual = usados.filter(p => p.manual).length;
+    $('estado-mercado').textContent = `${lectores} del lector · ${publicos} de la API · ${manual} manual(es). `
       + (faltan ? `${faltan} sin precio; se usa 0 y se indica en el detalle de abajo. ` : 'Precios aplicados a la calculadora. ')
       + (fallos.length ? 'Error al actualizar: ' + fallos.map(r => r.reason.message).join('; ') + '. Se reintentará. ' : '')
-      + (modo !== 'manual' ? (mercado.conectado ? 'Conexión en vivo con el lector.' : 'Actualización de respaldo cada 2 segundos.') : 'Puedes editar y guardar tus precios.');
+      + (modo !== 'manual' ? (mercado.conectado ? 'Conexión en vivo con los precios guardados.' : 'Actualización de respaldo cada 2 segundos.') : 'Puedes editar y guardar tus precios.');
   } catch (error) {
     if (error.name !== 'AbortError' && token === mercado.token) $('estado-mercado').textContent = error.message + '. Se reintentará la actualización.';
   } finally {
@@ -193,6 +246,7 @@ function iniciarMercado() {
     cambiar();
   });
   actualizarImagenesObjeto();
+  iniciarConsultaApi();
   $('actualizar-mercado').addEventListener('click', () => actualizarMercado({forzar:true}));
   $('precio-venta').addEventListener('input', () => {
     if (!precioEsSoloLectura(estado.id) && estado.id) mercado.ventasManuales.set(estado.id, leerNumero('precio-venta'));
@@ -218,7 +272,7 @@ function iniciarMercado() {
 function mostrarCanalLocal() {
   const indicador = $('canal-local');
   if (!indicador) return;
-  indicador.textContent = mercado.conectado ? 'Sincronización local activa' : 'Reconectando · consulta de respaldo';
+  indicador.textContent = mercado.conectado ? 'Sincronización de precios activa' : 'Reconectando · consulta de respaldo';
   indicador.dataset.estado = mercado.conectado ? 'activo' : 'espera';
 }
 function mostrarOpcionesLector() {
@@ -226,6 +280,6 @@ function mostrarOpcionesLector() {
   $('conexion-lector').hidden = mercado.modo === 'manual';
   $('detalle-fuente-mercado').textContent = mercado.modo === 'lector'
     ? 'Solo lecturas de pantalla confirmadas para la ciudad y calidad elegidas'
-    : mercado.modo === 'ambos' ? 'Primero el lector; si falta una lectura, se usa el precio guardado manualmente'
+    : mercado.modo === 'ambos' ? 'Primero el lector; después, la API sincronizada o tus precios manuales'
     : 'Tus precios guardados manualmente · sin distinguir ciudad';
 }
