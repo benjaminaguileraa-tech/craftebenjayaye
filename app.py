@@ -32,12 +32,13 @@ from hashlib import sha256
 from functools import lru_cache
 from pathlib import Path
 from mercado import consultar_precios
-from precios_guardados import consultar_lecturas
+from precios_guardados import abrir as abrir_lecturas, consultar_lecturas
 from historial_mercado import consultar_historial,imagen_historial
 from almacenamiento import obtener_db,conectar_base
 from archivos_web import enviar_archivo,acepta_gzip
 from precios_api import (MAX_BYTES_API, RUTA_ENVIO_API, RUTA_PUBLICOS, agregar_publicos,
                          consultar_cotizaciones, recibir_cotizaciones, token_valido)
+from sincronizacion_lecturas import MAX_BYTES_LECTOR, RUTA_ENVIO_LECTOR, recibir_lecturas
 
 
 ROOT = Path(__file__).resolve().parent
@@ -1072,28 +1073,34 @@ class Manejador(BaseHTTPRequestHandler):
         archivo, tipo = static[ruta.path]
         enviar_archivo(self,ROOT / archivo,tipo)
 
-    def _recibir_api_publica(self):
-        token = os.environ.get('BENJAYAYE_API_SYNC_TOKEN', '')
+    def _recibir_precios_remotos(self, es_lector=False):
+        token = os.environ.get('BENJAYAYE_API_SYNC_TOKEN') or os.environ.get('BENJAYAYE_SYNC_KEY', '')
         if not token_valido(token):
-            self._json(503, {'error': 'La sincronización remota de la API no está configurada.'});return
+            self._json(503, {'error': 'Configura BENJAYAYE_API_SYNC_TOKEN en el servidor.'});return
         recibido = self.headers.get('Authorization', '')
         if not hmac.compare_digest(recibido.encode('utf-8'), ('Bearer '+token).encode('utf-8')):
             self._json(401, {'error': 'Token de sincronización incorrecto.'});return
         try:
             tamano = int(self.headers.get('Content-Length', '0'))
-            if not 0 < tamano <= MAX_BYTES_API or self.headers.get_content_type() != 'application/json':
+            limite = MAX_BYTES_LECTOR if es_lector else MAX_BYTES_API
+            if not 0 < tamano <= limite or self.headers.get_content_type() != 'application/json':
                 raise ValueError('El envío debe ser un lote JSON de tamaño válido.')
             self.connection.settimeout(10)
-            datos = json.loads(self.rfile.read(tamano))
-            self._json(200, recibir_cotizaciones(DB_PRECIOS, POR_ID, datos))
-        except (ValueError, TypeError, UnicodeError) as exc:
-            self._json(400, {'error': 'Envío JSON inválido.' if isinstance(exc,(json.JSONDecodeError,UnicodeError)) else str(exc)})
+            cuerpo = self.rfile.read(tamano)
+            if len(cuerpo) != tamano:
+                raise ValueError('El lote se recibió incompleto.')
+            datos = json.loads(cuerpo)
+            salida = (recibir_lecturas(DB_PRECIOS, POR_ID, datos, abrir_lecturas) if es_lector
+                      else recibir_cotizaciones(DB_PRECIOS, POR_ID, datos))
+            self._json(200, salida)
+        except (ValueError, TypeError, RecursionError) as exc:
+            self._json(400, {'error': 'Envío JSON inválido.' if isinstance(exc,(json.JSONDecodeError,UnicodeError,RecursionError)) else str(exc)})
         except (sqlite3.Error, OSError):
-            self._json(503, {'error': 'No se pudieron guardar las cotizaciones. Reintenta más tarde.'})
+            self._json(503, {'error': 'No se pudieron guardar los precios. Reintenta más tarde.'})
 
     def do_POST(self) -> None:
-        if self.path == RUTA_ENVIO_API:
-            self._recibir_api_publica();return
+        if self.path in (RUTA_ENVIO_API, RUTA_ENVIO_LECTOR):
+            self._recibir_precios_remotos(es_lector=self.path == RUTA_ENVIO_LECTOR);return
         if not self._acceso_compartido_autorizado():return
         if self.path not in ("/api/calcular", "/api/precios", "/api/plan", '/api/respaldo/importar'):
             self.send_error(404)
@@ -1200,7 +1207,7 @@ def iniciar() -> None:
     host="0.0.0.0" if args.compartir_red_local or args.web_alojada else "127.0.0.1"
     if args.web_alojada:
         token=os.environ.get('BENJAYAYE_ACCESO_WEB','')
-        if not token_valido(token) or token == os.environ.get('BENJAYAYE_API_SYNC_TOKEN'):
+        if not token_valido(token) or token in (os.environ.get('BENJAYAYE_API_SYNC_TOKEN'), os.environ.get('BENJAYAYE_SYNC_KEY')):
             parser.error('Configura BENJAYAYE_ACCESO_WEB con una clave privada distinta del token de sincronización.')
         try:puerto=int(os.environ.get('PORT','10000')) if args.puerto is None else args.puerto
         except ValueError:parser.error('PORT debe contener un número de puerto.')

@@ -37,6 +37,7 @@ function mensajeGuardado(texto, error = false) {
 function pintarPlan(plan) {
   estado.ultimoPlan = plan;
   $('completar-plan').disabled = estado.planOcupado || !plan.lotes.length;
+  $('borrar-todos-lotes').disabled = estado.planOcupado || !plan.lotes.length;
   $("total-lotes-plan").textContent = cantidadPlan(plan.lotes.length);
   $("total-items-plan").textContent = cantidadPlan(plan.total_items);
   $("total-materiales-plan").textContent = cantidadPlan(plan.materiales.length);
@@ -93,7 +94,7 @@ function pintarPlan(plan) {
   pintarLotesPlan(plan);
   $("estado-plan").textContent = plan.lotes.some(lote => !lote.retorno_guardado)
     ? "Hay lotes antiguos sin devolución guardada: se mantienen al 0 %. Usa Editar lote para aplicarles el porcentaje que necesites."
-    : "Lista privada de este navegador. Cada lote conserva su porcentaje de devolución.";
+    : "Lista guardada en este equipo. Cada lote conserva su porcentaje de devolución.";
   $("estado-plan").classList.remove("error");
   const f = plan.finanzas;
   $('ganancia-total-plan').textContent = f?.ganancia_total != null ? dinero(f.ganancia_total) : 'Pendiente';
@@ -184,6 +185,7 @@ function bloquearPlan(ocupado) {
   estado.planOcupado = ocupado;
   $("recargar-plan").disabled = ocupado;
   $('completar-plan').disabled = ocupado || !estado.ultimoPlan?.lotes.length;
+  $('borrar-todos-lotes').disabled = ocupado || !estado.ultimoPlan?.lotes.length;
   $('deshacer-lote').disabled=ocupado;
   $('restaurar-respaldo').disabled=ocupado||!$('archivo-respaldo').files?.length;
   $('desmarcar-compras').disabled=ocupado||!estado.ultimoPlan?.materiales.some(m=>m.cantidad_marcada!=null);
@@ -266,9 +268,38 @@ async function quitarLote(id) {
   } finally { bloquearPlan(false); }
 }
 
+async function borrarTodosLotes() {
+  if (estado.planOcupado || !estado.ultimoPlan?.lotes.length) return;
+  if (!window.confirm("¿Borrar todos los lotes del plan, incluso los ocultos por filtros?\n\nLos precios guardados y las compras marcadas se conservan. Este borrado no se puede deshacer desde el plan.")) return;
+  bloquearPlan(true);
+  const boton = $('borrar-todos-lotes');
+  boton.textContent = "Borrando lotes…";
+  try {
+    const respuesta = await fetch("/api/plan/lotes", {method: "DELETE"});
+    const datos = await respuesta.json();
+    if (!respuesta.ok) throw new Error(datos.error || "No se pudieron borrar los lotes");
+    estado.loteEliminado = null;
+    estado.guardadoIntento = null;
+    $('deshacer-lote').hidden = true;
+    pintarPlan(datos);
+    const cantidad = datos.lotes_borrados;
+    const mensaje = cantidad === 1 ? "Se borró 1 lote." : cantidad > 1
+      ? `Se borraron ${cantidadPlan(cantidad)} lotes.` : "No había lotes para borrar.";
+    $('estado-plan').textContent = mensaje;
+    mensajeGuardado(mensaje);
+  } catch (error) {
+    $('estado-plan').textContent = `No se pudo confirmar el borrado: ${error.message}. Actualiza la lista para comprobarlo.`;
+    $('estado-plan').classList.add("error");
+  } finally {
+    boton.textContent = "Borrar todos los lotes";
+    bloquearPlan(false);
+  }
+}
+
 function iniciarPlan() {
   $("guardar-lote").addEventListener("click", guardarLoteActual);
   $("recargar-plan").addEventListener("click", cargarPlan);
+  $('borrar-todos-lotes').addEventListener('click', borrarTodosLotes);
   $('completar-plan').addEventListener('click',completarDatosPlan);
   $('desmarcar-compras').addEventListener('click',reiniciarCompras);
   $('buscar-materiales-plan').addEventListener('input',filtrarComprasPlan);
@@ -285,7 +316,7 @@ function iniciarPlan() {
   $('deshacer-lote').addEventListener('click',deshacerLote);
   $('archivo-respaldo').addEventListener('change',()=>{
     $('restaurar-respaldo').disabled=estado.planOcupado||!$('archivo-respaldo').files?.length;
-    $('estado-respaldo').textContent='El respaldo añadirá solo los lotes y precios ausentes en tu espacio privado.';
+    $('estado-respaldo').textContent='El respaldo añadirá solo los lotes y precios que no existen en este equipo.';
   });
   $('restaurar-respaldo').addEventListener('click',restaurarRespaldo);
   $('editor-lote-form').addEventListener('submit',guardarEdicionLote);
